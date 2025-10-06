@@ -3,15 +3,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import shap
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
 
 # -----------------------------
 # Page setup
 # -----------------------------
-st.set_page_config(page_title="🎓 Student Performance Prediction", layout="wide")
+st.set_page_config(page_title="Student Performance Prediction", layout="wide")
 st.title("🎓 Student Performance Prediction Dashboard")
 
 # -----------------------------
@@ -20,31 +18,21 @@ st.title("🎓 Student Performance Prediction Dashboard")
 @st.cache_resource
 def load_models():
     models = {}
-    scaler = None
-    le_y = None
-
     try:
-        models["XGBoost"] = joblib.load("XGBoost_model.pkl")
-        models["CatBoost"] = joblib.load("CatBoost_model.pkl")
+        models['XGBoost'] = joblib.load("XGBoost_model.pkl")
+        models['CatBoost'] = joblib.load("CatBoost_model.pkl")
         st.success("✅ Models loaded successfully!")
     except Exception as e:
-        st.error(f"❌ Error loading models: {e}")
+        st.error(f"❌ Error loading model files: {e}")
+    return models
 
-    # Optional: try loading scaler/encoder if they exist
-    if os.path.exists("scaler.pkl"):
-        scaler = joblib.load("scaler.pkl")
-    if os.path.exists("label_encoder_y.pkl"):
-        le_y = joblib.load("label_encoder_y.pkl")
-
-    return models, scaler, le_y
-
-models, scaler, le_y = load_models()
+models = load_models()
 
 if not models:
     st.stop()
 
 # -----------------------------
-# Sidebar: Model Choice
+# Model Selection
 # -----------------------------
 st.sidebar.header("⚙️ Model Settings")
 model_choice = st.sidebar.selectbox("Select Model", list(models.keys()))
@@ -60,8 +48,7 @@ uploaded_file = st.file_uploader("Upload your dataset (CSV format)", type=['csv'
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    st.write("### Uploaded Data Preview")
-    st.dataframe(df.head())
+    st.write("### Uploaded Data Preview", df.head())
 
     # -----------------------------
     # Basic Preprocessing
@@ -70,19 +57,9 @@ if uploaded_file:
         df[c] = df[c].fillna(df[c].mean())
 
     for c in df.select_dtypes(include='object').columns:
-        df[c] = df[c].astype(str).fillna("missing")
-        df[c] = pd.factorize(df[c])[0]
+        df[c] = df[c].fillna("missing")
 
-    # Optional scaling
-    if scaler:
-        try:
-            num_cols = df.select_dtypes(include=np.number).columns
-            df[num_cols] = scaler.transform(df[num_cols])
-            st.success("✅ Data scaled successfully using saved scaler.")
-        except Exception as e:
-            st.warning(f"⚠️ Scaling skipped due to mismatch: {e}")
-    else:
-        st.info("ℹ️ No scaler found. Using raw numeric values for prediction.")
+    st.info("ℹ️ Using raw input data — no scaling or encoding applied.")
 
     # -----------------------------
     # Prediction
@@ -91,59 +68,57 @@ if uploaded_file:
         try:
             preds = model.predict(df)
 
-            if le_y:
-                preds = le_y.inverse_transform(preds)
-                df["Predicted_Grade"] = preds
-            else:
-                df["Predicted_Score"] = preds
+            # Determine which column might contain student names
+            name_col = None
+            for col in df.columns:
+                if 'name' in col.lower() or 'student' in col.lower():
+                    name_col = col
+                    break
 
-            st.write("### 🎯 Prediction Results")
-            st.dataframe(df.head())
+            if name_col is None:
+                st.warning("⚠️ No 'Name' column found — adding a generic ID column instead.")
+                df['Student_Name'] = [f"Student_{i+1}" for i in range(len(df))]
+                name_col = 'Student_Name'
+
+            # Create a clean results DataFrame
+            results = pd.DataFrame({
+                "Student_Name": df[name_col],
+                "Predicted_Output": preds
+            })
+
+            st.success("✅ Prediction completed successfully!")
+            st.write("### 🎯 Prediction Results (Name + Prediction)", results.head())
 
             # -----------------------------
             # Visualization
             # -----------------------------
             st.subheader("📊 Prediction Summary")
 
-            if "Predicted_Grade" in df.columns:
+            if results['Predicted_Output'].dtype == 'object' or len(results['Predicted_Output'].unique()) < 10:
                 fig, ax = plt.subplots(figsize=(6, 4))
-                sns.countplot(x="Predicted_Grade", data=df, palette="coolwarm", ax=ax)
-                plt.title("Predicted Grade Distribution")
+                sns.countplot(x='Predicted_Output', data=results, palette='coolwarm', ax=ax)
+                plt.title("Predicted Category Distribution")
                 st.pyplot(fig)
             else:
                 fig, ax = plt.subplots(figsize=(6, 4))
-                sns.histplot(df["Predicted_Score"], kde=True, bins=20, ax=ax)
-                plt.title("Predicted Score Distribution")
+                sns.histplot(results['Predicted_Output'], kde=True, bins=20, ax=ax)
+                plt.title("Predicted Value Distribution")
                 st.pyplot(fig)
 
             # -----------------------------
-            # SHAP Explainability
+            # Download Results
             # -----------------------------
-            st.subheader("🧠 SHAP Model Explainability")
-            try:
-                explainer = shap.TreeExplainer(model)
-                shap_values = explainer.shap_values(df)
-                st.write("### 🔍 Feature Importance (SHAP Summary)")
-                shap_fig, ax = plt.subplots()
-                shap.summary_plot(shap_values, df, plot_type="bar", show=False)
-                st.pyplot(shap_fig)
-            except Exception as e:
-                st.warning(f"⚠️ SHAP visualization skipped: {e}")
-
-            # -----------------------------
-            # Download Predictions
-            # -----------------------------
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("⬇️ Download Predictions", csv, "predictions.csv", "text/csv")
+            csv = results.to_csv(index=False).encode('utf-8')
+            st.download_button("⬇️ Download Predictions", csv, "student_predictions.csv", "text/csv")
 
         except Exception as e:
             st.error(f"❌ Prediction failed: {e}")
 
 else:
-    st.info("👆 Please upload a CSV file to start predictions.")
+    st.info("👆 Upload a CSV file to start predictions.")
 
 # -----------------------------
 # Footer
 # -----------------------------
 st.markdown("---")
-st.caption("Developed by **Kayamkhani Thasleem** | B.Tech CSE (R20) | 🧠 Streamlit Deployment for Student Performance ML Models")
+st.caption("Developed by Kayamkhani Thasleem | B.Tech CSE (R20) | 🧠 Streamlit Deployment for Student Performance ML Models")
