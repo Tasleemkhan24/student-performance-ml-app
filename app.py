@@ -26,7 +26,6 @@ def load_models():
     return models
 
 models = load_models()
-
 if not models:
     st.stop()
 
@@ -36,6 +35,15 @@ if not models:
 st.sidebar.header("⚙️ Model Settings")
 model_choice = st.sidebar.selectbox("Select Model", list(models.keys()))
 model = models[model_choice]
+
+# -----------------------------
+# Expected Features
+# -----------------------------
+if hasattr(model, "feature_names_in_"):
+    expected_features = list(model.feature_names_in_)
+else:
+    st.warning("⚠️ Feature names not found in the model. Make sure CSV columns match training features.")
+    expected_features = []
 
 st.markdown("---")
 
@@ -52,11 +60,8 @@ if uploaded_file:
     # -----------------------------
     # Auto Column Cleaning
     # -----------------------------
-    # Remove duplicate columns
-    df = df.loc[:, ~df.columns.duplicated()]
-
-    # Remove unwanted _x / _y suffixes (from merged CSVs)
-    df.columns = [col.replace('_x', '').replace('_y', '') for col in df.columns]
+    df = df.loc[:, ~df.columns.duplicated()]  # remove duplicate columns
+    df.columns = [col.replace('_x', '').replace('_y', '') for col in df.columns]  # clean _x/_y
 
     # Fill missing numeric and object values
     for c in df.select_dtypes(include=np.number).columns:
@@ -64,42 +69,35 @@ if uploaded_file:
     for c in df.select_dtypes(include='object').columns:
         df[c] = df[c].fillna("missing")
 
-    st.info("ℹ️ Using raw input data — no scaling or encoding applied. Non-numeric columns ignored during prediction.")
+    st.info("ℹ️ Using raw numeric input features — categorical columns are ignored for prediction.")
 
     # -----------------------------
     # Prediction
     # -----------------------------
     if st.button("🔮 Predict Performance"):
         try:
-            # Use only numeric columns
-            numeric_df = df.select_dtypes(include=['int64', 'float64'])
-
-            if numeric_df.empty:
-                st.error("❌ No numeric columns found for prediction. Please upload data with numeric features.")
+            # Select only numeric features present in model
+            numeric_features = [f for f in expected_features if f in df.columns and np.issubdtype(df[f].dtype, np.number)]
+            if not numeric_features:
+                st.error("❌ No numeric columns found for prediction matching model features.")
                 st.stop()
 
-            # Make predictions
-            preds = model.predict(numeric_df)
+            X_pred = df[numeric_features]
+            preds = model.predict(X_pred)
 
-            # Find name column (case-insensitive)
-            name_col = None
-            for col in df.columns:
-                if 'name' in col.lower():
-                    name_col = col
-                    break
-
-            if name_col is None:
-                st.warning("⚠️ No 'Name' column found — adding a generic ID column instead.")
+            # Combine first and last name if available
+            name_cols = [col for col in df.columns if 'first_name' in col.lower() or 'last_name' in col.lower()]
+            if name_cols:
+                df['Student_Name'] = df[name_cols].apply(lambda x: ' '.join(x.astype(str)), axis=1)
+            else:
                 df['Student_Name'] = [f"Student_{i+1}" for i in range(len(df))]
-                name_col = 'Student_Name'
 
-            # Combine results
+            # Prepare results
             results = pd.DataFrame({
-                "Student_Name": df[name_col],
+                "Student_Name": df['Student_Name'],
                 "Prediction": preds
             })
 
-            # Display results
             st.success("✅ Prediction completed successfully!")
             st.write("### 🎯 Prediction Results (Student Name + Prediction)", results.head())
 
@@ -107,7 +105,6 @@ if uploaded_file:
             # Visualization
             # -----------------------------
             st.subheader("📊 Prediction Summary")
-
             if results['Prediction'].dtype == 'object' or len(results['Prediction'].unique()) < 10:
                 fig, ax = plt.subplots(figsize=(6, 4))
                 sns.countplot(x='Prediction', data=results, palette='coolwarm', ax=ax)
