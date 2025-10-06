@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -51,27 +50,41 @@ if uploaded_file:
     st.write("### Uploaded Data Preview", df.head())
 
     # -----------------------------
-    # Basic Preprocessing
+    # Auto Column Cleaning
     # -----------------------------
+    # Remove duplicate columns
+    df = df.loc[:, ~df.columns.duplicated()]
+
+    # Remove unwanted _x / _y suffixes (from merged CSVs)
+    df.columns = [col.replace('_x', '').replace('_y', '') for col in df.columns]
+
+    # Fill missing numeric and object values
     for c in df.select_dtypes(include=np.number).columns:
         df[c] = df[c].fillna(df[c].mean())
-
     for c in df.select_dtypes(include='object').columns:
         df[c] = df[c].fillna("missing")
 
-    st.info("ℹ️ Using raw input data — no scaling or encoding applied.")
+    st.info("ℹ️ Using raw input data — no scaling or encoding applied. Non-numeric columns ignored during prediction.")
 
     # -----------------------------
     # Prediction
     # -----------------------------
     if st.button("🔮 Predict Performance"):
         try:
-            preds = model.predict(df)
+            # Use only numeric columns
+            numeric_df = df.select_dtypes(include=['int64', 'float64'])
 
-            # Determine which column might contain student names
+            if numeric_df.empty:
+                st.error("❌ No numeric columns found for prediction. Please upload data with numeric features.")
+                st.stop()
+
+            # Make predictions
+            preds = model.predict(numeric_df)
+
+            # Find name column (case-insensitive)
             name_col = None
             for col in df.columns:
-                if 'name' in col.lower() or 'student' in col.lower():
+                if 'name' in col.lower():
                     name_col = col
                     break
 
@@ -80,28 +93,29 @@ if uploaded_file:
                 df['Student_Name'] = [f"Student_{i+1}" for i in range(len(df))]
                 name_col = 'Student_Name'
 
-            # Create a clean results DataFrame
+            # Combine results
             results = pd.DataFrame({
                 "Student_Name": df[name_col],
-                "Predicted_Output": preds
+                "Prediction": preds
             })
 
+            # Display results
             st.success("✅ Prediction completed successfully!")
-            st.write("### 🎯 Prediction Results (Name + Prediction)", results.head())
+            st.write("### 🎯 Prediction Results (Student Name + Prediction)", results.head())
 
             # -----------------------------
             # Visualization
             # -----------------------------
             st.subheader("📊 Prediction Summary")
 
-            if results['Predicted_Output'].dtype == 'object' or len(results['Predicted_Output'].unique()) < 10:
+            if results['Prediction'].dtype == 'object' or len(results['Prediction'].unique()) < 10:
                 fig, ax = plt.subplots(figsize=(6, 4))
-                sns.countplot(x='Predicted_Output', data=results, palette='coolwarm', ax=ax)
+                sns.countplot(x='Prediction', data=results, palette='coolwarm', ax=ax)
                 plt.title("Predicted Category Distribution")
                 st.pyplot(fig)
             else:
                 fig, ax = plt.subplots(figsize=(6, 4))
-                sns.histplot(results['Predicted_Output'], kde=True, bins=20, ax=ax)
+                sns.histplot(results['Prediction'], kde=True, bins=20, ax=ax)
                 plt.title("Predicted Value Distribution")
                 st.pyplot(fig)
 
