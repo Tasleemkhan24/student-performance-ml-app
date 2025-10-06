@@ -58,35 +58,32 @@ if uploaded_file:
     st.write("### Uploaded Data Preview", df.head())
 
     # -----------------------------
-    # Auto Column Cleaning
+    # Fill missing values
     # -----------------------------
-    df = df.loc[:, ~df.columns.duplicated()]  # remove duplicate columns
-    df.columns = [col.replace('_x', '').replace('_y', '') for col in df.columns]  # clean _x/_y
-
-    # Fill missing numeric and object values
     for c in df.select_dtypes(include=np.number).columns:
         df[c] = df[c].fillna(df[c].mean())
     for c in df.select_dtypes(include='object').columns:
         df[c] = df[c].fillna("missing")
 
-    st.info("ℹ️ Using raw numeric input features — categorical columns are ignored for prediction.")
+    st.info("ℹ️ Using numeric input features — categorical columns are ignored for prediction.")
 
     # -----------------------------
     # Prediction
     # -----------------------------
     if st.button("🔮 Predict Performance"):
         try:
-            # Select only numeric features present in model
-            numeric_features = [f for f in expected_features if f in df.columns and np.issubdtype(df[f].dtype, np.number)]
-            if not numeric_features:
-                st.error("❌ No numeric columns found for prediction matching model features.")
+            # Check missing columns
+            missing_cols = [col for col in expected_features if col not in df.columns]
+            if missing_cols:
+                st.error(f"❌ Missing columns required for prediction: {missing_cols}")
                 st.stop()
 
-            X_pred = df[numeric_features]
+            # Select features in correct order
+            X_pred = df[expected_features]
             preds = model.predict(X_pred)
 
             # Combine first and last name if available
-            name_cols = [col for col in df.columns if 'first_name' in col.lower() or 'last_name' in col.lower()]
+            name_cols = [col for col in df.columns if 'First_Name' in col or 'Last_Name' in col]
             if name_cols:
                 df['Student_Name'] = df[name_cols].apply(lambda x: ' '.join(x.astype(str)), axis=1)
             else:
