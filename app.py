@@ -11,11 +11,6 @@ cb_model = joblib.load("CatBoost_model.pkl")
 scaler = joblib.load("scaler.pkl")
 le_y = joblib.load("label_encoder_y.pkl")
 
-# Columns used during training
-final_features = joblib.load("models/final_features.pkl")  # Optional: save this during training
-numeric_feats = joblib.load("models/numeric_features.pkl")  # Optional: save numeric column list
-cat_feats = [c for c in final_features if c not in numeric_feats]
-
 # -----------------------------
 # 2. Streamlit UI
 # -----------------------------
@@ -31,17 +26,24 @@ if uploaded_file:
     # -----------------------------
     # 3. Prepare features
     # -----------------------------
-    df_model = df_pred[final_features].copy()
+    # Infer features used by XGBoost from its booster
+    xgb_features = xgb_model.get_booster().feature_names
+    df_model = df_pred.copy()
+    
+    # Keep only columns that XGBoost was trained on
+    df_model = df_model[xgb_features]
+
+    # Separate numeric and categorical
+    numeric_feats = df_model.select_dtypes(include=[np.number]).columns.tolist()
+    cat_feats = [c for c in df_model.columns if c not in numeric_feats]
 
     # Handle categorical columns
     for c in cat_feats:
-        if c in df_model.columns:
-            df_model[c] = df_model[c].astype(str).fillna('missing')
+        df_model[c] = df_model[c].astype(str).fillna('missing')
 
     # Scale numeric columns
     for c in numeric_feats:
-        if c in df_model.columns:
-            df_model[c] = scaler.transform(df_model[[c]])
+        df_model[c] = scaler.transform(df_model[[c]])
 
     # -----------------------------
     # 4. Predictions
