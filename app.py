@@ -1,124 +1,217 @@
+# app_final_fixed_names.py
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import os
+from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+sns.set()
+
+# -------------------------------------------------------
+# Streamlit Page Configuration
+# -------------------------------------------------------
 st.set_page_config(page_title="Student Performance Prediction", layout="wide")
 st.title("🎓 Student Performance Prediction Dashboard")
 
-# -----------------------------
-# Load Models
-# -----------------------------
+# -------------------------------------------------------
+# Load models and artifacts safely from 'models/' folder
+# -------------------------------------------------------
 @st.cache_resource
-def load_models():
-    models = {}
+def load_artifact(path):
+    """Helper to load artifact if it exists"""
     try:
-        models['XGBoost'] = joblib.load("XGBoost_model.pkl")
-        models['CatBoost'] = joblib.load("CatBoost_model.pkl")
-        st.success("✅ Models loaded successfully!")
+        if os.path.exists(path):
+            return joblib.load(path)
+        else:
+            return None
     except Exception as e:
-        st.error(f"❌ Error loading model files: {e}")
-    return models
+        st.error(f"Error loading {path}: {e}")
+        return None
 
-models = load_models()
-if not models:
+
+st.sidebar.header("⚙️ Model & Artifact Settings")
+model_path = st.sidebar.text_input("Model Path", value="models/XGBoost_model.pkl")
+scaler_path = st.sidebar.text_input("Scaler Path (optional)", value="models/scaler.pkl")
+encoders_path = st.sidebar.text_input("Encoders Path (optional)", value="models/encoders.pkl")
+features_path = st.sidebar.text_input("Feature List Path (optional)", value="models/feature_list.pkl")
+target_le_path = st.sidebar.text_input("Target Encoder Path (optional)", value="models/label_encoder_y.pkl")
+
+model = load_artifact(model_path)
+scaler = load_artifact(scaler_path)
+encoders = load_artifact(encoders_path)
+feature_list = load_artifact(features_path)
+le_target = load_artifact(target_le_path)
+
+if model is None:
+    st.error(f"❌ Model not found at {model_path}. Please upload or set correct path.")
+    st.stop()
+else:
+    st.success("✅ Model loaded successfully!")
+
+# -------------------------------------------------------
+# Upload Prediction CSV
+# -------------------------------------------------------
+st.markdown("---")
+st.subheader("📤 Upload Student Dataset for Prediction")
+uploaded_file = st.file_uploader("Upload CSV file for prediction", type=['csv'])
+
+if uploaded_file is None:
+    st.info("👆 Upload a CSV file to start predictions.")
     st.stop()
 
-# Sidebar model selection
-st.sidebar.header("⚙️ Model Settings")
-model_choice = st.sidebar.selectbox("Select Model", list(models.keys()))
-model = models[model_choice]
+df = pd.read_csv(uploaded_file)
+st.write("### Uploaded Data (Preview)", df.head())
 
-# Get feature list
-if hasattr(model, "feature_names_in_"):
-    expected_features = list(model.feature_names_in_)
-else:
-    expected_features = []
-    st.warning("⚠️ Model feature names not found. Make sure CSV columns match training features.")
+# -------------------------------------------------------
+# Separate name/email columns (for display only)
+# -------------------------------------------------------
+name_cols = [c for c in df.columns if any(x in c.lower() for x in ['first_name', 'last_name', 'email'])]
+df_names = df[name_cols].astype(str).fillna('') if len(name_cols) > 0 else None
 
-st.markdown("---")
+# Drop name/email columns before preprocessing
+df_features = df.drop(columns=name_cols, errors='ignore')
 
-# -----------------------------
-# Upload Section
-# -----------------------------
-st.subheader("📤 Upload Student Dataset for Prediction")
-uploaded_file = st.file_uploader("Upload your dataset (CSV format)", type=['csv'])
+# -------------------------------------------------------
+# Handle missing values
+# -------------------------------------------------------
+for c in df_features.select_dtypes(include=np.number).columns:
+    df_features[c] = df_features[c].fillna(df_features[c].mean())
+for c in df_features.select_dtypes(include='object').columns:
+    df_features[c] = df_features[c].fillna('missing')
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    st.write("### Uploaded Data Preview", df.head())
+# -------------------------------------------------------
+# If encoders missing, build them from uploaded CSV
+# -------------------------------------------------------
+if encoders is None:
+    st.warning("⚠️ Encoders not found. Building from uploaded CSV (may affect accuracy).")
+    encoders = {}
+    cat_cols = df_features.select_dtypes(include='object').columns.tolist()
+    for c in cat_cols:
+        le = LabelEncoder()
+        df_features[c] = df_features[c].astype(str)
+        le.fit(df_features[c])
+        encoders[c] = le
+    os.makedirs("models", exist_ok=True)
+    joblib.dump(encoders, "models/encoders_built_from_pred_csv.pkl")
+    st.info("Encoders built and saved to models/encoders_built_from_pred_csv.pkl")
 
-    # Fill missing values
-    for c in df.select_dtypes(include=np.number).columns:
-        df[c] = df[c].fillna(df[c].mean())
-    for c in df.select_dtypes(include='object').columns:
-        df[c] = df[c].fillna("missing")
-
-    # Identify name/email columns
-    name_related_cols = [c for c in df.columns if any(x in c.lower() for x in ['name', 'email'])]
-
-    # Keep copy for displaying names later
-    df_names = df[name_related_cols].copy() if name_related_cols else None
-
-    st.info("ℹ️ Dropping non-numeric columns before prediction (like names/emails).")
-
-    # Select numeric columns only for prediction
-    df_numeric = df.select_dtypes(include=[np.number])
-
-    # Match expected features (if available)
-    if expected_features:
-        missing_cols = [col for col in expected_features if col not in df_numeric.columns]
-        if missing_cols:
-            st.warning(f"⚠️ Missing numeric columns expected by the model: {missing_cols}")
-        X_pred = df_numeric.reindex(columns=expected_features, fill_value=0)
+# -------------------------------------------------------
+# Determine final feature list
+# -------------------------------------------------------
+if feature_list is None:
+    if hasattr(model, "feature_names_in_"):
+        feature_list = list(model.feature_names_in_)
+        st.info("✅ Using model.feature_names_in_ as feature order.")
     else:
-        X_pred = df_numeric
+        num_feats = df_features.select_dtypes(include=np.number).columns.tolist()
+        cat_feats = [c for c in df_features.select_dtypes(include='object').columns.tolist()]
+        feature_list = num_feats + cat_feats
+        st.warning("⚠️ Feature list inferred automatically (may not match training).")
+    joblib.dump(feature_list, "models/feature_list_inferred.pkl")
 
-    # -----------------------------
-    # Predict
-    # -----------------------------
-    if st.button("🔮 Predict Performance"):
+st.write("### Expected features:", len(feature_list))
+
+# -------------------------------------------------------
+# Prepare input features in correct order
+# -------------------------------------------------------
+X_work = pd.DataFrame(index=df_features.index)
+
+for feat in feature_list:
+    if feat not in df_features.columns:
+        st.warning(f"Feature '{feat}' missing in uploaded CSV → filled with 0")
+        X_work[feat] = 0
+        continue
+
+    # Encode categorical
+    if feat in encoders:
+        le = encoders[feat]
+        vals = df_features[feat].astype(str).tolist()
+        transformed = []
+        for v in vals:
+            if v in le.classes_:
+                transformed.append(int(le.transform([v])[0]))
+            else:
+                transformed.append(0)  # unseen value fallback
+        X_work[feat] = transformed
+    else:
+        # numeric
         try:
-            preds = model.predict(X_pred)
+            X_work[feat] = pd.to_numeric(df_features[feat])
+        except Exception:
+            X_work[feat] = 0
 
-            # Combine name columns for display
-            if df_names is not None:
-                df['Student_Name'] = df_names.apply(lambda x: ' '.join(x.astype(str)), axis=1)
-            else:
-                df['Student_Name'] = [f"Student_{i+1}" for i in range(len(df))]
+X_pred = X_work.reindex(columns=feature_list, fill_value=0)
+st.write("### Processed Features (Preview)", X_pred.head())
 
-            results = pd.DataFrame({
-                "Student_Name": df['Student_Name'],
-                "Prediction": preds
-            })
-
-            st.success("✅ Prediction completed successfully!")
-            st.write("### 🎯 Prediction Results (Student Name + Prediction)", results.head(60))
-
-            # Visualization
-            st.subheader("📊 Prediction Summary")
-            if results['Prediction'].dtype == 'object' or len(results['Prediction'].unique()) < 10:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                sns.countplot(x='Prediction', data=results, palette='coolwarm', ax=ax)
-                plt.title("Predicted Category Distribution")
-                st.pyplot(fig)
-            else:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                sns.histplot(results['Prediction'], kde=True, bins=20, ax=ax)
-                plt.title("Predicted Value Distribution")
-                st.pyplot(fig)
-
-            # Download
-            csv = results.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ Download Predictions", csv, "student_predictions.csv", "text/csv")
-
-        except Exception as e:
-            st.error(f"❌ Prediction failed: {e}")
-
+# -------------------------------------------------------
+# Apply Scaler (if available)
+# -------------------------------------------------------
+if scaler is not None:
+    try:
+        numeric_cols = X_pred.select_dtypes(include=[np.number]).columns.tolist()
+        X_scaled = X_pred.copy()
+        X_scaled[numeric_cols] = scaler.transform(X_pred[numeric_cols])
+        X_input = X_scaled
+        st.info("✅ Scaler applied to numeric features.")
+    except Exception as e:
+        st.error(f"Scaler application failed: {e}. Proceeding without scaling.")
+        X_input = X_pred
 else:
-    st.info("👆 Upload a CSV file to start predictions.")
+    X_input = X_pred
 
+st.write("### Final Input to Model", X_input.head())
+
+# -------------------------------------------------------
+# Prediction
+# -------------------------------------------------------
+if st.button("🔮 Predict Performance"):
+    try:
+        preds = model.predict(X_input)
+
+        if le_target is not None:
+            try:
+                preds_display = le_target.inverse_transform(preds)
+            except Exception:
+                preds_display = preds
+        else:
+            preds_display = preds
+
+        # Create readable student names
+        if df_names is not None:
+            if {'first_name_x', 'last_name_x'} <= set(df_names.columns.str.lower()):
+                df['Student_Name'] = df_names['First_Name_x'] + ' ' + df_names['Last_Name_x']
+            elif {'first_name', 'last_name'} <= set(df_names.columns.str.lower()):
+                df['Student_Name'] = df_names['first_name'] + ' ' + df_names['last_name']
+            else:
+                df['Student_Name'] = df_names.astype(str).agg(' '.join, axis=1)
+        else:
+            df['Student_Name'] = [f"Student_{i+1}" for i in range(len(df))]
+
+        # Combine results
+        results = pd.DataFrame({
+            "Student_Name": df['Student_Name'],
+            "Prediction": preds_display
+        })
+
+        st.success("✅ Prediction Completed Successfully!")
+        st.write("### 🎯 Prediction Results", results.head(60))
+
+        # Visualization
+        st.subheader("📊 Prediction Summary")
+        st.bar_chart(results['Prediction'].value_counts())
+
+        # Download
+        csv = results.to_csv(index=False).encode('utf-8')
+        st.download_button("⬇️ Download Predictions", csv, "student_predictions.csv", "text/csv")
+
+    except Exception as e:
+        st.error(f"❌ Prediction failed: {e}")
+
+# -------------------------------------------------------
+# Footer
+# -------------------------------------------------------
 st.markdown("---")
-st.caption("Developed by Kayamkhani Thasleem | B.Tech CSE (R20) | 🧠 Streamlit Deployment for Student Performance ML Models")
+st.caption("Developed by Kayamkhani Thasleem | B.Tech CSE (R20) | Streamlit Cloud Deployment for Student ML Models")
