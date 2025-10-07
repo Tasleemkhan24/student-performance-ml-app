@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -65,7 +66,19 @@ if uploaded_file:
     for c in df.select_dtypes(include='object').columns:
         df[c] = df[c].fillna("missing")
 
-    st.info("ℹ️ Using numeric input features — categorical columns are ignored for prediction.")
+    # -----------------------------
+    # Encode categorical features
+    # -----------------------------
+    cat_cols = df.select_dtypes(include='object').columns
+    if len(cat_cols) > 0:
+        st.info(f"🔡 Encoding categorical columns: {list(cat_cols)}")
+        label_encoders = {}
+        for col in cat_cols:
+            le = LabelEncoder()
+            df[col] = le.fit_transform(df[col].astype(str))
+            label_encoders[col] = le
+    else:
+        st.info("ℹ️ No categorical columns detected.")
 
     # -----------------------------
     # Prediction
@@ -80,6 +93,8 @@ if uploaded_file:
 
             # Select features in correct order
             X_pred = df[expected_features]
+
+            # Perform prediction
             preds = model.predict(X_pred)
 
             # Combine first and last name if available
