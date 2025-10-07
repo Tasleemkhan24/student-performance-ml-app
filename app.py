@@ -5,8 +5,8 @@ import joblib
 # -----------------------------
 # 1. Load trained models
 # -----------------------------
-xgb_model = joblib.load("models/best_xgb.pkl")
-cb_model = joblib.load("models/best_catboost.pkl")
+xgb_model = joblib.load("XGBoost_model.pkl")
+cb_model = joblib.load("CatBoost_model.pkl")
 
 # List of features used during training (replace with your exact features)
 final_features = [
