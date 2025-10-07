@@ -16,29 +16,33 @@ st.set_page_config(
 )
 
 # -------------------------------
-# Dark Theme + Styling
+# Dark Theme + Animations
 # -------------------------------
 st.markdown("""
 <style>
 .stApp { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364); color: #ffffff; }
 [data-testid="stSidebar"] { background: rgba(20,20,20,0.9); backdrop-filter: blur(6px); border-right: 2px solid #0f2027; }
 
-.top-banner { background-color: rgba(30,144,255,0.9); padding:20px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.3); text-align:center; margin-bottom:25px; }
-.top-banner h1 { color:#ffffff; margin:0; font-size:36px; }
-.top-banner p { color:#e0f7ff; font-size:18px; margin:5px 0 0 0; }
+.top-banner { background-color: rgba(30,144,255,0.9); padding:20px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.3); text-align:center; margin-bottom:25px; transition: transform 0.3s;}
+.top-banner:hover { transform: scale(1.02); }
 
 h1,h2,h3,h4 { color:#66ccff; font-family:'Segoe UI',sans-serif; font-weight:700; }
 
-.stButton>button { background-color:#1e90ff; color:white; border-radius:10px; height:3em; width:100%; font-size:16px; font-weight:bold; box-shadow:0 0 10px #1e90ff; }
-.stButton>button:hover { background-color:#005f99; box-shadow:0 0 15px #00bfff; }
+.stButton>button { background-color:#1e90ff; color:white; border-radius:10px; height:3em; width:100%; font-size:16px; font-weight:bold; box-shadow:0 0 10px #1e90ff; transition: all 0.3s ease; }
+.stButton>button:hover { background-color:#005f99; box-shadow:0 0 20px #00bfff; transform: scale(1.05); }
+
 .stFileUploader>div>div { color:#ffffff; }
 
-.badge { display:inline-block; padding:4px 12px; border-radius:12px; font-weight:bold; margin:2px; cursor:pointer; }
+.badge { display:inline-block; padding:4px 12px; border-radius:12px; font-weight:bold; margin:2px; cursor:pointer; transition: all 0.3s ease; }
+.badge:hover { transform: scale(1.2); box-shadow: 0 0 10px #ffffff; }
 .badge-A { background-color:#00c853; color:#ffffff; }
 .badge-B { background-color:#76ff03; color:#000000; }
 .badge-C { background-color:#ffeb3b; color:#000000; }
 .badge-D { background-color:#ff9800; color:#ffffff; }
 .badge-F { background-color:#d50000; color:#ffffff; }
+
+.kpi-card { padding:20px; border-radius:12px; background-color: rgba(30,30,30,0.7); box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: transform 0.3s ease, box-shadow 0.3s ease; text-align:center; }
+.kpi-card:hover { transform: scale(1.05); box-shadow: 0 0 20px #1e90ff; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -72,7 +76,7 @@ with st.sidebar:
     st.markdown("---")
 
 # -------------------------------
-# Initialize session state for dynamic filtering
+# Session State
 # -------------------------------
 if "filter_grade" not in st.session_state:
     st.session_state.filter_grade = "All"
@@ -138,20 +142,20 @@ with tab_predictions:
                 preds['CatBoost'] = le_y.inverse_transform(cb_preds)
             for col, val in preds.items(): df[col] = val
 
-        # KPI Cards
+        # KPI Cards with animation
         c1,c2,c3 = st.columns(3)
-        c1.metric("Total Students", f"{df.shape[0]}")
-        c2.metric("Missing Values", f"{df.isna().sum().sum()}")
-        if "XGBoost" in df.columns: c3.metric("Top Grade", df["XGBoost"].mode()[0])
+        c1.markdown(f"<div class='kpi-card'><h3>Total Students</h3><h2>{df.shape[0]}</h2></div>",unsafe_allow_html=True)
+        c2.markdown(f"<div class='kpi-card'><h3>Missing Values</h3><h2>{df.isna().sum().sum()}</h2></div>",unsafe_allow_html=True)
+        if "XGBoost" in df.columns: c3.markdown(f"<div class='kpi-card'><h3>Top Grade</h3><h2>{df['XGBoost'].mode()[0]}</h2></div>",unsafe_allow_html=True)
 
-        # Display badges
-        def grade_badge(val, model):
+        # Animated badges
+        def grade_badge(val, tooltip):
             badge_class = f"badge-{val}" if val in ['A','B','C','D','F'] else ""
-            return f"<span class='badge {badge_class}' onclick='window.parent.postMessage(\"{val}\", \"*\")'>{val}</span>"
+            return f"<span class='badge {badge_class}' title='{tooltip}'>{val}</span>"
 
         display_df = df.copy()
-        display_df['XGBoost_Badge'] = display_df['XGBoost'].apply(lambda x: grade_badge(x,"XGBoost") if 'XGBoost' in display_df else '')
-        display_df['CatBoost_Badge'] = display_df['CatBoost'].apply(lambda x: grade_badge(x,"CatBoost") if 'CatBoost' in display_df else '')
+        display_df['XGBoost_Badge'] = display_df['XGBoost'].apply(lambda x: grade_badge(x,f"XGBoost: {x}") if 'XGBoost' in display_df else '')
+        display_df['CatBoost_Badge'] = display_df['CatBoost'].apply(lambda x: grade_badge(x,f"CatBoost: {x}") if 'CatBoost' in display_df else '')
         display_df['Predictions'] = display_df[['XGBoost_Badge','CatBoost_Badge']].agg(' '.join, axis=1)
 
         st.subheader("Prediction Results")
@@ -176,4 +180,4 @@ with tab_charts:
             fig = px.histogram(filtered_df, x=model, title=f"{model} Distribution", color=model, color_discrete_sequence=color)
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Charts will appear after predictions are made.")
+        st.info("Charts will appear after predictions.")
