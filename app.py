@@ -34,11 +34,11 @@ h1,h2,h3,h4 { color:#66ccff; font-family:'Segoe UI',sans-serif; font-weight:700;
 .stFileUploader>div>div { color:#ffffff; }
 
 .badge { display:inline-block; padding:4px 12px; border-radius:12px; font-weight:bold; margin:2px; cursor:pointer; }
-.badge-A { background-color:#00c853; color:#ffffff; }  /* Green */
-.badge-B { background-color:#76ff03; color:#000000; }  /* Light Green */
-.badge-C { background-color:#ffeb3b; color:#000000; }  /* Yellow */
-.badge-D { background-color:#ff9800; color:#ffffff; }  /* Orange */
-.badge-F { background-color:#d50000; color:#ffffff; }  /* Red */
+.badge-A { background-color:#00c853; color:#ffffff; }
+.badge-B { background-color:#76ff03; color:#000000; }
+.badge-C { background-color:#ffeb3b; color:#000000; }
+.badge-D { background-color:#ff9800; color:#ffffff; }
+.badge-F { background-color:#d50000; color:#ffffff; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -70,6 +70,12 @@ with st.sidebar:
     st.header("⚙️ Options")
     primary_model = st.selectbox("Show predictions for", ["Both", "XGBoost", "CatBoost"])
     st.markdown("---")
+
+# -------------------------------
+# Initialize session state for dynamic filtering
+# -------------------------------
+if "filter_grade" not in st.session_state:
+    st.session_state.filter_grade = "All"
 
 # -------------------------------
 # Tabs
@@ -138,26 +144,22 @@ with tab_predictions:
         c2.metric("Missing Values", f"{df.isna().sum().sum()}")
         if "XGBoost" in df.columns: c3.metric("Top Grade", df["XGBoost"].mode()[0])
 
-        # Filter
-        if preds:
-            grades_list = sorted(set(df[list(preds.keys())[0]]))
-            selected_grade = st.selectbox("Filter students by grade", ["All"]+grades_list)
-            display_df = df.copy()
-            if selected_grade != "All":
-                display_df = display_df[display_df[list(preds.keys())[0]]==selected_grade]
+        # Display badges
+        def grade_badge(val, model):
+            badge_class = f"badge-{val}" if val in ['A','B','C','D','F'] else ""
+            return f"<span class='badge {badge_class}' onclick='window.parent.postMessage(\"{val}\", \"*\")'>{val}</span>"
 
-            # Color-coded badges
-            def grade_badge(val): return f"<span class='badge badge-{val}'>{val}</span>" if val in ['A','B','C','D','F'] else val
-            display_df['XGBoost_Badge'] = display_df['XGBoost'].apply(grade_badge) if 'XGBoost' in display_df else ''
-            display_df['CatBoost_Badge'] = display_df['CatBoost'].apply(grade_badge) if 'CatBoost' in display_df else ''
-            display_df['Predictions'] = display_df[['XGBoost_Badge','CatBoost_Badge']].agg(' '.join, axis=1)
+        display_df = df.copy()
+        display_df['XGBoost_Badge'] = display_df['XGBoost'].apply(lambda x: grade_badge(x,"XGBoost") if 'XGBoost' in display_df else '')
+        display_df['CatBoost_Badge'] = display_df['CatBoost'].apply(lambda x: grade_badge(x,"CatBoost") if 'CatBoost' in display_df else '')
+        display_df['Predictions'] = display_df[['XGBoost_Badge','CatBoost_Badge']].agg(' '.join, axis=1)
 
-            st.write(display_df[['Student Name','Predictions']].to_html(escape=False, index=False), unsafe_allow_html=True)
+        st.subheader("Prediction Results")
+        st.write(display_df[['Student Name','Predictions']].to_html(escape=False,index=False), unsafe_allow_html=True)
 
-            csv = display_df[['Student Name']+list(preds.keys())].to_csv(index=False).encode("utf-8")
-            st.download_button("💾 Download Predictions", data=csv, file_name="predictions.csv", mime="text/csv")
-    else:
-        st.warning("Upload a file first to get predictions.")
+        # Download CSV
+        csv = display_df[['Student Name']+list(preds.keys())].to_csv(index=False).encode("utf-8")
+        st.download_button("💾 Download Predictions", data=csv, file_name="predictions.csv", mime="text/csv")
 
 # -------------------------------
 # Charts Tab
@@ -165,9 +167,13 @@ with tab_predictions:
 with tab_charts:
     if uploaded_file and preds:
         st.subheader("Grade Distribution Charts")
+        filtered_df = df.copy()
+        if st.session_state.filter_grade != "All":
+            filtered_df = filtered_df[filtered_df[list(preds.keys())[0]]==st.session_state.filter_grade]
+
         for model in preds.keys():
-            color = ['#00c853','#76ff03','#ffeb3b','#ff9800','#d50000']  # A,B,C,D,F
-            fig = px.histogram(df, x=model, title=f"{model} Distribution", color=model, color_discrete_sequence=color)
+            color = ['#00c853','#76ff03','#ffeb3b','#ff9800','#d50000']
+            fig = px.histogram(filtered_df, x=model, title=f"{model} Distribution", color=model, color_discrete_sequence=color)
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Charts will appear after predictions.")
+        st.info("Charts will appear after predictions are made.")
