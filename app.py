@@ -13,8 +13,8 @@ scaler = joblib.load("scaler.pkl")
 le_y = joblib.load("label_encoder_y.pkl")  # for target inverse transform
 
 # Load feature lists
-final_features = joblib.load("models/final_features.pkl")
-numeric_feats = joblib.load("models/numeric_features.pkl")
+final_features = joblib.load("final_features.pkl")
+numeric_feats = joblib.load("numeric_features.pkl")
 cat_feats = [c for c in final_features if c not in numeric_feats]
 
 # -------------------------------
