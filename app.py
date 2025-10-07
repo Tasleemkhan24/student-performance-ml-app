@@ -95,7 +95,7 @@ if uploaded_file:
             })
 
             st.success("✅ Prediction completed successfully!")
-            st.write("### 🎯 Prediction Results (Student Name + Prediction)", results.head())
+            st.write("### 🎯 Prediction Results (Student Name + Prediction)", results.head(60))
 
             # Visualization
             st.subheader("📊 Prediction Summary")
