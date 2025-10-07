@@ -1,96 +1,105 @@
-# app.py
 import streamlit as st
 import pandas as pd
+import numpy as np
 import joblib
+from sklearn.preprocessing import LabelEncoder
 
-st.set_page_config(page_title="Student Performance Prediction", layout="wide")
+# -------------------------------
+# Load Models & Encoders
+# -------------------------------
+xgb_model = joblib.load("XGBoost_model.pkl")
+cb_model = joblib.load("CatBoost_model.pkl")
+scaler = joblib.load("scaler.pkl")
+le_y = joblib.load("label_encoder_y.pkl")  # for target inverse transform
+
+# Load feature lists
+final_features = joblib.load("models/final_features.pkl")
+numeric_feats = joblib.load("models/numeric_features.pkl")
+cat_feats = [c for c in final_features if c not in numeric_feats]
+
+# -------------------------------
+# Streamlit UI
+# -------------------------------
 st.title("Student Performance Prediction")
 st.write("Upload a CSV file with student data to predict grades.")
 
-# -----------------------------
-# 1. Upload CSV file
-# -----------------------------
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 if uploaded_file is not None:
-    df_pred = pd.read_csv(uploaded_file)
-    st.subheader("Preview of uploaded data")
-    st.dataframe(df_pred.head(10))
+    df = pd.read_csv(uploaded_file)
+    st.write("Preview of uploaded data")
+    st.dataframe(df.head(10))
 
-    # -----------------------------
-    # 2. Load models & preprocessing
-    # -----------------------------
-    xgb_model = joblib.load("XGBoost_model.pkl")
-    cb_model = joblib.load("CatBoost_model.pkl")
-    scaler = joblib.load("scaler.pkl")
-    le_y = joblib.load("label_encoder_y.pkl")  # For decoding predicted grades
+    df_pred = df.copy()
 
-    # -----------------------------
-    # 3. Define numeric and categorical features
-    # -----------------------------
-    numeric_feats = [
-        'Age_x','Attendance (%)_x','Midterm_Score_x','Assignments_Avg_x',
-        'Quizzes_Avg_x','Participation_Score_x','Projects_Score_x',
-        'Total_Score_x','Study_Hours_per_Week_x','Stress_Level (1-10)_x',
-        'Sleep_Hours_per_Night_x','Age_y','Attendance (%)_y','Midterm_Score_y',
-        'Assignments_Avg_y','Quizzes_Avg_y','Participation_Score_y',
-        'Projects_Score_y','Total_Score_y','Study_Hours_per_Week_y',
-        'Stress_Level (1-10)_y','Sleep_Hours_per_Night_y','Overall_Avg_Score',
-        'Improvement_Score','Engagement_Score','Study_Efficiency',
-        'Stress_Sleep_Ratio','Final_Score_Diff','Attendance_Ratio',
-        'Study_Attendance'
-    ]
-
-    cat_feats = [c for c in df_pred.columns if c not in numeric_feats and c != 'Student_ID']
-
-    # -----------------------------
-    # 4. Fill missing values
-    # -----------------------------
+    # ---------------------------
+    # Preprocess numeric columns
+    # ---------------------------
     for col in numeric_feats:
         if col not in df_pred.columns:
             df_pred[col] = 0
+        else:
+            df_pred[col] = df_pred[col].fillna(0)
 
+    # Scale numeric features
+    df_pred[numeric_feats] = scaler.transform(df_pred[numeric_feats])
+
+    # ---------------------------
+    # Preprocess categorical columns
+    # ---------------------------
     for col in cat_feats:
         if col not in df_pred.columns:
             df_pred[col] = 'missing'
         else:
             df_pred[col] = df_pred[col].fillna('missing')
+        df_pred[col] = df_pred[col].astype(str)
 
-    # -----------------------------
-    # 5. Scale numeric features
-    # -----------------------------
-    df_pred[numeric_feats] = scaler.transform(df_pred[numeric_feats])
+        # Load per-column LabelEncoder if exists
+        try:
+            le = joblib.load(f"models/le_{col}.pkl")
+            # Transform, unseen categories set as 'missing'
+            df_pred[col] = df_pred[col].apply(lambda x: x if x in le.classes_ else 'missing')
+            # Update encoder classes to include 'missing' if not present
+            if 'missing' not in le.classes_:
+                le.classes_ = np.append(le.classes_, 'missing')
+            df_pred[col] = le.transform(df_pred[col])
+        except:
+            # fallback: encode on the fly
+            le = LabelEncoder()
+            df_pred[col] = le.fit_transform(df_pred[col])
 
-    # -----------------------------
-    # 6. Encode categorical features
-    # -----------------------------
-    for col in cat_feats:
-        df_pred[col] = df_pred[col].astype(str).factorize()[0]
+    # Keep only final features in order
+    df_pred = df_pred[final_features]
 
-    # -----------------------------
-    # 7. Predict using models
-    # -----------------------------
-    xgb_preds = xgb_model.predict(df_pred[numeric_feats + cat_feats])
-    cb_preds = cb_model.predict(df_pred[numeric_feats + cat_feats])
+    # ---------------------------
+    # Predictions
+    # ---------------------------
+    st.subheader("Predictions")
 
-    # Decode grades using label encoder
-    xgb_preds = le_y.inverse_transform(xgb_preds)
-    cb_preds = le_y.inverse_transform(cb_preds)
+    try:
+        xgb_preds = xgb_model.predict(df_pred)
+        xgb_preds_labels = le_y.inverse_transform(xgb_preds)
+        df['XGBoost_Predicted_Grade'] = xgb_preds_labels
+    except Exception as e:
+        st.error(f"XGBoost prediction error: {e}")
 
-    # -----------------------------
-    # 8. Show results
-    # -----------------------------
-    df_results = df_pred[['Student_ID']].copy()
-    df_results['XGBoost_Grade'] = xgb_preds
-    df_results['CatBoost_Grade'] = cb_preds
+    try:
+        cb_preds = cb_model.predict(df_pred)
+        cb_preds_labels = le_y.inverse_transform(cb_preds)
+        df['CatBoost_Predicted_Grade'] = cb_preds_labels
+    except Exception as e:
+        st.error(f"CatBoost prediction error: {e}")
 
-    st.subheader("Predicted Grades")
-    st.dataframe(df_results)
+    # ---------------------------
+    # Show Results
+    # ---------------------------
+    st.write("Predictions on uploaded data")
+    st.dataframe(df[['Student_ID','First_Name_x','Last_Name_x','XGBoost_Predicted_Grade','CatBoost_Predicted_Grade']])
 
-    # Optional: download CSV
-    csv = df_results.to_csv(index=False)
+    # Download results
+    csv = df.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="Download Predictions as CSV",
         data=csv,
-        file_name="predicted_grades.csv",
-        mime="text/csv"
+        file_name='predictions.csv',
+        mime='text/csv'
     )
