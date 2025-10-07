@@ -1,108 +1,96 @@
+# app.py
 import streamlit as st
 import pandas as pd
-import numpy as np
 import joblib
 
-# -----------------------------
-# 1. Load models, scaler, encoder
-# -----------------------------
-xgb_model = joblib.load("XGBoost_model.pkl")
-cb_model = joblib.load("CatBoost_model.pkl")
-scaler = joblib.load("scaler.pkl")
-le_y = joblib.load("label_encoder_y.pkl")
-
-# -----------------------------
-# 2. Streamlit UI
-# -----------------------------
+st.set_page_config(page_title="Student Performance Prediction", layout="wide")
 st.title("Student Performance Prediction")
 st.write("Upload a CSV file with student data to predict grades.")
 
+# -----------------------------
+# 1. Upload CSV file
+# -----------------------------
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+    df_pred = pd.read_csv(uploaded_file)
     st.subheader("Preview of uploaded data")
-    st.dataframe(df.head(10))
+    st.dataframe(df_pred.head(10))
 
     # -----------------------------
-    # 3. Feature Engineering
+    # 2. Load models & preprocessing
     # -----------------------------
-    df_fe = df.copy()
-
-    # Overall_Avg_Score
-    cols = ['Midterm_Score_x','Final_Score_x','Assignments_Avg_x','Quizzes_Avg_x']
-    df_fe['Overall_Avg_Score'] = df_fe[[c for c in cols if c in df_fe.columns]].mean(axis=1)
-
-    # Improvement_Score
-    df_fe['Improvement_Score'] = df_fe['Final_Score_x'] - df_fe['Midterm_Score_x'] if 'Final_Score_x' in df_fe.columns and 'Midterm_Score_x' in df_fe.columns else 0
-
-    # Engagement_Score
-    eng_cols = ['Participation_Score_x','Projects_Score_x','Quizzes_Avg_x']
-    df_fe['Engagement_Score'] = df_fe[[c for c in eng_cols if c in df_fe.columns]].sum(axis=1)/3.0
-
-    # Study_Efficiency
-    df_fe['Study_Efficiency'] = df_fe['Total_Score_x'] / (df_fe['Study_Hours_per_Week_x'] + 1) if 'Total_Score_x' in df_fe.columns and 'Study_Hours_per_Week_x' in df_fe.columns else 0
-
-    # Stress_Sleep_Ratio
-    df_fe['Stress_Sleep_Ratio'] = df_fe['Stress_Level (1-10)_x'] / (df_fe['Sleep_Hours_per_Night_x'] + 1) if 'Stress_Level (1-10)_x' in df_fe.columns and 'Sleep_Hours_per_Night_x' in df_fe.columns else 0
-
-    # Final_Score_Diff
-    df_fe['Final_Score_Diff'] = df_fe['Final_Score_x'] - df_fe['Final_Score_y'] if 'Final_Score_y' in df_fe.columns and 'Final_Score_x' in df_fe.columns else 0
-
-    # Attendance_Ratio
-    df_fe['Attendance_Ratio'] = df_fe['Attendance (%)_x'] / (df_fe['Attendance (%)_y'] + 1) if 'Attendance (%)_x' in df_fe.columns and 'Attendance (%)_y' in df_fe.columns else 0
-
-    # Study_Attendance
-    df_fe['Study_Attendance'] = df_fe['Study_Hours_per_Week_x'] * df_fe['Attendance (%)_x'] if 'Study_Hours_per_Week_x' in df_fe.columns and 'Attendance (%)_x' in df_fe.columns else 0
-
-    # Age_Group
-    df_fe['Age_Group'] = pd.cut(df_fe['Age_x'], bins=[0,15,20,25,100], labels=['<15','15-20','20-25','25+']) if 'Age_x' in df_fe.columns else 'missing'
+    xgb_model = joblib.load("XGBoost_model.pkl")
+    cb_model = joblib.load("CatBoost_model.pkl")
+    scaler = joblib.load("scaler.pkl")
+    le_y = joblib.load("label_encoder_y.pkl")  # For decoding predicted grades
 
     # -----------------------------
-    # 4. Dynamic feature list
+    # 3. Define numeric and categorical features
     # -----------------------------
-    # Numeric features
-    numeric_feats = df_fe.select_dtypes(include=np.number).columns.tolist()
+    numeric_feats = [
+        'Age_x','Attendance (%)_x','Midterm_Score_x','Assignments_Avg_x',
+        'Quizzes_Avg_x','Participation_Score_x','Projects_Score_x',
+        'Total_Score_x','Study_Hours_per_Week_x','Stress_Level (1-10)_x',
+        'Sleep_Hours_per_Night_x','Age_y','Attendance (%)_y','Midterm_Score_y',
+        'Assignments_Avg_y','Quizzes_Avg_y','Participation_Score_y',
+        'Projects_Score_y','Total_Score_y','Study_Hours_per_Week_y',
+        'Stress_Level (1-10)_y','Sleep_Hours_per_Night_y','Overall_Avg_Score',
+        'Improvement_Score','Engagement_Score','Study_Efficiency',
+        'Stress_Sleep_Ratio','Final_Score_Diff','Attendance_Ratio',
+        'Study_Attendance'
+    ]
 
-    # Categorical features (convert to string)
-    cat_feats = ['First_Name_x','Last_Name_x','Email_x','Gender_x','Department_x',
-                 'Grade_x','Extracurricular_Activities_x','Internet_Access_at_Home_x',
-                 'Parent_Education_Level_x','Family_Income_Level_x',
-                 'First_Name_y','Last_Name_y','Email_y','Gender_y','Department_y',
-                 'Grade_y','Extracurricular_Activities_y','Internet_Access_at_Home_y',
-                 'Parent_Education_Level_y','Family_Income_Level_y','Age_Group']
-    for c in cat_feats:
-        if c in df_fe.columns:
-            df_fe[c] = df_fe[c].astype(str)
+    cat_feats = [c for c in df_pred.columns if c not in numeric_feats and c != 'Student_ID']
+
+    # -----------------------------
+    # 4. Fill missing values
+    # -----------------------------
+    for col in numeric_feats:
+        if col not in df_pred.columns:
+            df_pred[col] = 0
+
+    for col in cat_feats:
+        if col not in df_pred.columns:
+            df_pred[col] = 'missing'
         else:
-            df_fe[c] = 'missing'
+            df_pred[col] = df_pred[col].fillna('missing')
 
-    # Combine all features
-    final_features = numeric_feats + cat_feats
-    df_pred = df_fe[final_features].copy()
-
-    # Scale numeric columns
+    # -----------------------------
+    # 5. Scale numeric features
+    # -----------------------------
     df_pred[numeric_feats] = scaler.transform(df_pred[numeric_feats])
 
     # -----------------------------
-    # 5. Predictions
+    # 6. Encode categorical features
     # -----------------------------
-    st.subheader("Predictions")
-    xgb_preds = xgb_model.predict(df_pred)
-    df['XGBoost_Grade'] = le_y.inverse_transform(xgb_preds)
-
-    cb_preds = cb_model.predict(df_pred)
-    df['CatBoost_Grade'] = le_y.inverse_transform(cb_preds.astype(int))
-
-    st.dataframe(df[['Student_ID','First_Name_x','Last_Name_x','XGBoost_Grade','CatBoost_Grade']])
+    for col in cat_feats:
+        df_pred[col] = df_pred[col].astype(str).factorize()[0]
 
     # -----------------------------
-    # 6. Download predictions
+    # 7. Predict using models
     # -----------------------------
-    csv = df.to_csv(index=False).encode('utf-8')
+    xgb_preds = xgb_model.predict(df_pred[numeric_feats + cat_feats])
+    cb_preds = cb_model.predict(df_pred[numeric_feats + cat_feats])
+
+    # Decode grades using label encoder
+    xgb_preds = le_y.inverse_transform(xgb_preds)
+    cb_preds = le_y.inverse_transform(cb_preds)
+
+    # -----------------------------
+    # 8. Show results
+    # -----------------------------
+    df_results = df_pred[['Student_ID']].copy()
+    df_results['XGBoost_Grade'] = xgb_preds
+    df_results['CatBoost_Grade'] = cb_preds
+
+    st.subheader("Predicted Grades")
+    st.dataframe(df_results)
+
+    # Optional: download CSV
+    csv = df_results.to_csv(index=False)
     st.download_button(
-        label="Download predictions as CSV",
+        label="Download Predictions as CSV",
         data=csv,
-        file_name='predictions.csv',
-        mime='text/csv',
+        file_name="predicted_grades.csv",
+        mime="text/csv"
     )
-
