@@ -1,86 +1,96 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import joblib
-import numpy as np
 
-# =========================================
-# 🎯 App Title
-# =========================================
-st.set_page_config(page_title="Student Performance Prediction", layout="wide")
-st.title("🎓 Student Performance Prediction Dashboard")
+# -----------------------------
+# 1. Load models
+# -----------------------------
+xgb_model = joblib.load("models/best_xgb.pkl")
+cb_model = joblib.load("models/best_catboost.pkl")
 
-# =========================================
-# ⚙️ Load Models from GitHub Repo (local path)
-# =========================================
-@st.cache_resource
-def load_models():
-    models = {}
-    try:
-        models['XGBoost'] = joblib.load("XGBoost_model.pkl")
-        models['CatBoost'] = joblib.load("CatBoost_model.pkl")
-        st.success("✅ Models loaded successfully!")
-    except Exception as e:
-        st.error(f"❌ Error loading model files: {e}")
-    return models
+# -----------------------------
+# 2. Final features used in training
+# -----------------------------
+final_features = [
+    'Age_x','Attendance (%)_x','Midterm_Score_x','Assignments_Avg_x',
+    'Quizzes_Avg_x','Participation_Score_x','Projects_Score_x',
+    'Total_Score_x','Study_Hours_per_Week_x','Stress_Level (1-10)_x',
+    'Sleep_Hours_per_Night_x','Age_y','Attendance (%)_y','Midterm_Score_y',
+    'Assignments_Avg_y','Quizzes_Avg_y','Participation_Score_y',
+    'Projects_Score_y','Total_Score_y','Study_Hours_per_Week_y',
+    'Stress_Level (1-10)_y','Sleep_Hours_per_Night_y','Overall_Avg_Score',
+    'Improvement_Score','Engagement_Score','Study_Efficiency',
+    'Stress_Sleep_Ratio','Final_Score_Diff','Attendance_Ratio',
+    'Study_Attendance','First_Name_x','Last_Name_x','Email_x','Gender_x',
+    'Department_x','Grade_x','Extracurricular_Activities_x',
+    'Internet_Access_at_Home_x','Parent_Education_Level_x',
+    'Family_Income_Level_x','First_Name_y','Last_Name_y','Email_y','Gender_y',
+    'Department_y','Grade_y','Extracurricular_Activities_y',
+    'Internet_Access_at_Home_y','Parent_Education_Level_y',
+    'Family_Income_Level_y','Age_Group'
+]
 
-models = load_models()
-if not models:
-    st.stop()
+# -----------------------------
+# 3. Streamlit UI
+# -----------------------------
+st.title("🎓 Student Performance Prediction")
+st.write("Upload a CSV of students to predict grades using XGBoost or CatBoost.")
 
-# =========================================
-# 📤 Upload CSV File
-# =========================================
-st.sidebar.header("📂 Upload Student Dataset for Prediction")
-uploaded_file = st.sidebar.file_uploader("Upload CSV File", type=["csv"])
+uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 
-if uploaded_file is not None:
+if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    st.subheader("📄 Uploaded Data Preview")
+    st.write("Preview of uploaded data:")
     st.dataframe(df.head())
 
-    # =========================================
-    # 🧠 Select Model
-    # =========================================
-    model_choice = st.sidebar.selectbox("Select Model", ["XGBoost", "CatBoost"])
-    model = models.get(model_choice)
+    # -----------------------------
+    # 4. Preprocessing
+    # -----------------------------
+    df_pred = df.copy()
 
-    # =========================================
-    # 🔍 Preprocessing (Remove Name/Email columns)
-    # =========================================
-    excluded_columns = ['First_Name', 'Last_Name', 'Email']
-    input_df = df.drop(columns=[col for col in excluded_columns if col in df.columns], errors='ignore')
+    # Ensure all final_features exist
+    for col in final_features:
+        if col not in df_pred.columns:
+            df_pred[col] = 0  # fill missing columns
 
-    # Identify categorical columns
-    cat_cols = input_df.select_dtypes(include=['object']).columns
+    df_pred = df_pred[final_features].copy()
 
-    # One-hot encode categorical variables
-    if len(cat_cols) > 0:
-        input_df = pd.get_dummies(input_df, columns=cat_cols, drop_first=True)
+    # Convert categorical columns to string for tree models
+    cat_cols = ['First_Name_x','Last_Name_x','Email_x','Gender_x','Department_x','Grade_x',
+                'Extracurricular_Activities_x','Internet_Access_at_Home_x','Parent_Education_Level_x',
+                'Family_Income_Level_x','First_Name_y','Last_Name_y','Email_y','Gender_y',
+                'Department_y','Grade_y','Extracurricular_Activities_y',
+                'Internet_Access_at_Home_y','Parent_Education_Level_y','Family_Income_Level_y','Age_Group']
+    for c in cat_cols:
+        if c in df_pred.columns:
+            df_pred[c] = df_pred[c].astype(str).fillna('missing')
 
-    # =========================================
-    # 🚀 Prediction
-    # =========================================
-    try:
-        y_pred = model.predict(input_df)
+    # -----------------------------
+    # 5. Model selection
+    # -----------------------------
+    model_choice = st.radio("Choose model:", ("XGBoost", "CatBoost"))
 
-        # Add predictions back to original data (with names)
-        result_df = pd.DataFrame()
-        if 'First_Name' in df.columns and 'Last_Name' in df.columns:
-            result_df['Student_Name'] = df['First_Name'].astype(str) + " " + df['Last_Name'].astype(str)
-        else:
-            result_df['Student_Name'] = [f"Student_{i+1}" for i in range(len(df))]
+    if model_choice == "XGBoost":
+        preds = xgb_model.predict(df_pred)
+    else:
+        preds = cb_model.predict(df_pred)
 
-        result_df['Prediction'] = y_pred
+    # -----------------------------
+    # 6. Display results
+    # -----------------------------
+    results = pd.DataFrame({
+        "First_Name": df_pred['First_Name_x'],
+        "Last_Name": df_pred['Last_Name_x'],
+        "Predicted_Grade": preds
+    })
 
-        st.subheader("🎯 Prediction Results")
-        st.dataframe(result_df)
+    st.write("✅ Predictions:")
+    st.dataframe(results)
 
-        # Download Results
-        csv = result_df.to_csv(index=False).encode('utf-8')
-        st.download_button("⬇️ Download Predictions", data=csv, file_name="predictions.csv", mime='text/csv')
-
-    except Exception as e:
-        st.error(f"❌ Prediction failed: {e}")
-
-else:
-    st.info("📥 Please upload a CSV file to begin prediction.")
+    st.download_button(
+        "📥 Download Results as CSV",
+        results.to_csv(index=False),
+        "predicted_grades.csv",
+        "text/csv"
+    )
