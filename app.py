@@ -16,29 +16,30 @@ st.set_page_config(
 )
 
 # -------------------------------
-# Dark Theme + Banner Styling
+# Light Theme + Banner Styling
 # -------------------------------
 st.markdown("""
 <style>
 /* App background */
 .stApp {
-    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-    color: #ffffff;
+    background: linear-gradient(135deg, #f8f9fa, #e9ecef, #dee2e6);
+    color: #000000;
+    font-family: 'Segoe UI', sans-serif;
 }
 
 /* Sidebar */
 [data-testid="stSidebar"] {
-    background: rgba(20, 20, 20, 0.9);
-    backdrop-filter: blur(6px);
-    border-right: 2px solid #0f2027;
+    background: #ffffff;
+    border-right: 1px solid #dcdcdc;
+    box-shadow: 2px 0 10px rgba(0,0,0,0.05);
 }
 
 /* Top Banner */
 .top-banner {
-    background-color: rgba(30, 144, 255, 0.9);
+    background-color: #007bff;
     padding: 20px;
     border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.15);
     text-align: center;
     margin-bottom: 25px;
 }
@@ -48,37 +49,72 @@ st.markdown("""
     font-size: 36px;
 }
 .top-banner p {
-    color: #e0f7ff;
+    color: #f8f9fa;
     font-size: 18px;
     margin: 5px 0 0 0;
 }
 
 /* Headings */
 h1, h2, h3, h4 {
-    color: #66ccff;
+    color: #007bff;
     font-family: 'Segoe UI', sans-serif;
     font-weight: 700;
 }
 
 /* Buttons */
 .stButton > button {
-    background-color: #1e90ff;
+    background-color: #007bff;
     color: white;
     border-radius: 10px;
     height: 3em;
     width: 100%;
     font-size: 16px;
     font-weight: bold;
-    box-shadow: 0 0 10px #1e90ff;
+    border: none;
+    box-shadow: 0 3px 8px rgba(0, 123, 255, 0.3);
+    transition: 0.2s;
 }
 .stButton > button:hover {
-    background-color: #005f99;
-    box-shadow: 0 0 15px #00bfff;
+    background-color: #0056b3;
+    box-shadow: 0 3px 12px rgba(0, 123, 255, 0.4);
 }
 
 /* File uploader */
 .stFileUploader>div>div {
-    color: #ffffff;
+    color: #000000;
+}
+
+/* DataFrame background */
+[data-testid="stDataFrame"] {
+    background-color: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.05);
+}
+
+/* Tabs */
+[data-baseweb="tab-list"] {
+    background-color: #f1f3f5;
+    border-radius: 8px;
+    padding: 6px;
+}
+[data-baseweb="tab"] {
+    color: #007bff;
+    font-weight: 600;
+}
+[data-baseweb="tab"]:hover {
+    background-color: #e7f1ff;
+    border-radius: 6px;
+}
+[data-baseweb="tab"][aria-selected="true"] {
+    background-color: #007bff;
+    color: white;
+    border-radius: 6px;
+}
+
+/* Metrics */
+[data-testid="stMetricValue"] {
+    color: #007bff;
+    font-weight: bold;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -236,11 +272,11 @@ with tab_charts:
         st.subheader("Grade Distribution Charts")
 
         if "XGBoost_Predicted_Grade" in df.columns:
-            fig = px.histogram(df, x="XGBoost_Predicted_Grade", title="XGBoost Grade Distribution", color_discrete_sequence=['#1e90ff'])
+            fig = px.histogram(df, x="XGBoost_Predicted_Grade", title="XGBoost Grade Distribution", color_discrete_sequence=['#007bff'])
             st.plotly_chart(fig, use_container_width=True)
 
         if "CatBoost_Predicted_Grade" in df.columns:
-            fig2 = px.histogram(df, x="CatBoost_Predicted_Grade", title="CatBoost Grade Distribution", color_discrete_sequence=['#66ccff'])
+            fig2 = px.histogram(df, x="CatBoost_Predicted_Grade", title="CatBoost Grade Distribution", color_discrete_sequence=['#17a2b8'])
             st.plotly_chart(fig2, use_container_width=True)
     else:
         st.info("Charts will appear after predictions are made.")
